@@ -19,7 +19,7 @@ Youtube_Assistant is an AI-powered Streamlit web application that allows users t
 
 ## 📂 Project Structure
 ```
-Youtube_Assistant/
+youtube_assistant/
 │── langchain_helper.py   # Handles transcript extraction, embedding, and query processing
 │── main.py               # Streamlit UI for user interaction
 │── requirements.txt      # Dependencies list
@@ -29,7 +29,7 @@ Youtube_Assistant/
 ## 🔧 Installation
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/yourusername/Youtube_Assistant.git
+   git clone https://github.com/chahalbaljinder/youtube_assistant.git
    cd Youtube_Assistant
    ```
 2. **Create and activate a virtual environment:**
