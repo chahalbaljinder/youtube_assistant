@@ -21,7 +21,10 @@ embeddings = SentenceTransformerEmbeddings(model_name='all-MiniLM-L6-v2')
 
 # Configure Gemini API
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-genai.configure(api_key=GOOGLE_API_KEY)
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+else:
+    raise ValueError("🚨 GOOGLE_API_KEY is missing. Please check your .env file.")
 
 class GeminiLLM(LLM, BaseModel):
     model_name: str = "gemini-2.0-flash"
@@ -30,6 +33,7 @@ class GeminiLLM(LLM, BaseModel):
     
     class Config:
         arbitrary_types_allowed = True
+
     @property
     def _llm_type(self) -> str:
         return "gemini"
@@ -44,7 +48,10 @@ class GeminiLLM(LLM, BaseModel):
                 temperature=self.temperature
             )
         )
-        return response.text
+        
+        if response and hasattr(response, "text"):
+            return response.text.strip()
+        return "⚠️ No response generated. Please try again."
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:
@@ -54,41 +61,66 @@ class GeminiLLM(LLM, BaseModel):
         }
 
 def create_db_from_youtube_video_url(video_url: str) -> FAISS:
-    loader = YoutubeLoader.from_youtube_url(video_url)
-    transcript = loader.load()
+    """
+    Fetches transcript from YouTube, processes it, and creates a FAISS vector store.
+    """
+    try:
+        loader = YoutubeLoader.from_youtube_url(video_url)
+        transcript = loader.load()
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    docs = text_splitter.split_documents(transcript)
+        if not transcript:
+            raise ValueError("⚠️ No transcript found for this video. Please try another one.")
 
-    db = FAISS.from_documents(docs, embeddings)
-    return db
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.split_documents(transcript)
+
+        if not docs:
+            raise ValueError("⚠️ Failed to split transcript into valid documents.")
+
+        # Ensure embeddings are generated before FAISS indexing
+        if embeddings and docs:
+            db = FAISS.from_documents(docs, embeddings)
+            return db
+        else:
+            raise ValueError("⚠️ Failed to generate embeddings.")
+    
+    except Exception as e:
+        raise RuntimeError(f"🚨 Error while creating FAISS index: {str(e)}")
 
 def get_response_from_query(db, query, k=4):
-    docs = db.similarity_search(query, k=k)
-    docs_page_content = " ".join([d.page_content for d in docs])
+    """
+    Retrieves the most relevant documents from FAISS and generates a response using Gemini.
+    """
+    try:
+        docs = db.similarity_search(query, k=k)
 
-    # Initialize Gemini LLM
-    llm = GeminiLLM()
+        if not docs:
+            return "⚠️ No relevant information found.", []
 
-    prompt = PromptTemplate(
-        input_variables=["question", "docs"],
-        template="""
-        You are a helpful assistant that can answer questions about YouTube videos 
-        based on the video's transcript.
-        
-        Answer the following question: {question}
-        By searching the following video transcript: {docs}
-        
-        Only use the factual information from the transcript to answer the question.
-        
-        If you feel like you don't have enough information to answer the question, say "I don't know".
-        
-        Your answers should be verbose and detailed.
-        """,
-    )
+        docs_page_content = " ".join([d.page_content for d in docs])
 
-    chain = LLMChain(llm=llm, prompt=prompt)
+        # Initialize Gemini LLM
+        llm = GeminiLLM()
 
-    response = chain.run(question=query, docs=docs_page_content)
-    response = response.replace("\n", "")
-    return response, docs
+        prompt = PromptTemplate(
+            input_variables=["question", "docs"],
+            template="""
+            You are a helpful AI assistant that answers questions about YouTube videos 
+            using the transcript.
+            
+            Answer the question: {question}
+            Using the following video transcript: {docs}
+            
+            If there isn't enough information, reply "I don't know."
+            
+            Your response should be clear and informative.
+            """,
+        )
+
+        chain = LLMChain(llm=llm, prompt=prompt)
+
+        response = chain.run(question=query, docs=docs_page_content)
+        return response.strip(), docs
+
+    except Exception as e:
+        return f"🚨 Error while generating response: {str(e)}", []
