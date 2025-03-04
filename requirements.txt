@@ -1,0 +1,9 @@
+langchain
+langchain-community
+google-generativeai
+sentence-transformers
+faiss-cpu
+youtube-transcript-api
+pytube
+python-dotenv
+streamlit
