@@ -8,31 +8,25 @@ from langchain.chains import LLMChain
 from langchain.llms.base import LLM
 import google.generativeai as genai
 from typing import Any, List, Optional, Dict
-import os
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-
-# Load environment variables
-load_dotenv()
 
 # Initialize the SentenceTransformer model for embeddings
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 embeddings = SentenceTransformerEmbeddings(model_name='all-MiniLM-L6-v2')
 
-# Configure Gemini API
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-else:
-    raise ValueError("🚨 GOOGLE_API_KEY is missing. Please check your .env file.")
-
 class GeminiLLM(LLM, BaseModel):
     model_name: str = "gemini-2.0-flash"
     temperature: float = 0.7
+    google_api_key: str
     _model: Any = None
     
     class Config:
         arbitrary_types_allowed = True
+
+    def __post_init__(self):
+        if not self.google_api_key:
+            raise ValueError("🚨 Google API Key is required.")
+        genai.configure(api_key=self.google_api_key)
 
     @property
     def _llm_type(self) -> str:
@@ -42,16 +36,18 @@ class GeminiLLM(LLM, BaseModel):
         if self._model is None:
             self._model = genai.GenerativeModel(self.model_name)
         
-        response = self._model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=self.temperature
+        try:
+            response = self._model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=self.temperature
+                )
             )
-        )
-        
-        if response and hasattr(response, "text"):
-            return response.text.strip()
-        return "⚠️ No response generated. Please try again."
+            if response and hasattr(response, "text"):
+                return response.text.strip()
+            return "⚠️ No response generated. Please check your API key or try again."
+        except Exception as e:
+            return f"🚨 Error generating response: {str(e)}"
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:
@@ -60,7 +56,7 @@ class GeminiLLM(LLM, BaseModel):
             "temperature": self.temperature
         }
 
-def create_db_from_youtube_video_url(video_url: str) -> FAISS:
+def create_db_from_youtube_video_url(video_url: str, google_api_key: str) -> FAISS:
     """
     Fetches transcript from YouTube, processes it, and creates a FAISS vector store.
     """
@@ -87,7 +83,7 @@ def create_db_from_youtube_video_url(video_url: str) -> FAISS:
     except Exception as e:
         raise RuntimeError(f"🚨 Error while creating FAISS index: {str(e)}")
 
-def get_response_from_query(db, query, k=4):
+def get_response_from_query(db, query: str, google_api_key: str, k=4):
     """
     Retrieves the most relevant documents from FAISS and generates a response using Gemini.
     """
@@ -99,8 +95,8 @@ def get_response_from_query(db, query, k=4):
 
         docs_page_content = " ".join([d.page_content for d in docs])
 
-        # Initialize Gemini LLM
-        llm = GeminiLLM()
+        # Initialize Gemini LLM with user-provided API key
+        llm = GeminiLLM(google_api_key=google_api_key)
 
         prompt = PromptTemplate(
             input_variables=["question", "docs"],
