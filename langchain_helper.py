@@ -61,11 +61,14 @@ def create_db_from_youtube_video_url(video_url: str, google_api_key: str) -> FAI
     Fetches transcript from YouTube, processes it, and creates a FAISS vector store.
     """
     try:
-        loader = YoutubeLoader.from_youtube_url(video_url)
+        loader = YoutubeLoader.from_youtube_url(video_url, add_video_info=True)
         transcript = loader.load()
 
         if not transcript:
-            raise ValueError("⚠️ No transcript found for this video. Please try another one.")
+            raise ValueError(
+                "⚠️ No transcript available for this video. "
+                "Please ensure the video has captions enabled or try another video."
+            )
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         docs = text_splitter.split_documents(transcript)
@@ -73,7 +76,6 @@ def create_db_from_youtube_video_url(video_url: str, google_api_key: str) -> FAI
         if not docs:
             raise ValueError("⚠️ Failed to split transcript into valid documents.")
 
-        # Ensure embeddings are generated before FAISS indexing
         if embeddings and docs:
             db = FAISS.from_documents(docs, embeddings)
             return db
@@ -81,6 +83,11 @@ def create_db_from_youtube_video_url(video_url: str, google_api_key: str) -> FAI
             raise ValueError("⚠️ Failed to generate embeddings.")
     
     except Exception as e:
+        if "Could not retrieve a transcript" in str(e):
+            raise ValueError(
+                "⚠️ Unable to retrieve transcript. This video may not have captions, "
+                "or requests are being blocked by YouTube. Please try another video."
+            )
         raise RuntimeError(f"🚨 Error while creating FAISS index: {str(e)}")
 
 def get_response_from_query(db, query: str, google_api_key: str, k=4):
@@ -95,7 +102,6 @@ def get_response_from_query(db, query: str, google_api_key: str, k=4):
 
         docs_page_content = " ".join([d.page_content for d in docs])
 
-        # Initialize Gemini LLM with user-provided API key
         llm = GeminiLLM(google_api_key=google_api_key)
 
         prompt = PromptTemplate(
