@@ -40,15 +40,19 @@ with st.sidebar:
 # Process Query
 if submit_button and youtube_url and query:
     with st.spinner("🔍 Processing... Please wait."):
-        db = lch.create_db_from_youtube_video_url(youtube_url)
-        response, docs = lch.get_response_from_query(db, query)
+        try:
+            db = lch.create_db_from_youtube_video_url(youtube_url)
+            response, docs = lch.get_response_from_query(db, query)
 
-        st.success("✅ Answer Generated!")
-        st.subheader("📜 Answer:")
-        st.write(textwrap.fill(response, width=180))
+            st.success("✅ Answer Generated!")
+            st.subheader("📜 Answer:")
+            st.write(textwrap.fill(response, width=180))
 
-        with st.expander("📑 See Related Context:"):
-            for doc in docs:
-                st.text(textwrap.fill(doc.page_content, width=180))  
+            with st.expander("📑 See Related Context:"):
+                for doc in docs:
+                    st.text(textwrap.fill(doc.page_content, width=180))
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+            st.info("💡 Please try with a different YouTube video that has captions/subtitles available.")
 else:
     st.info("⚠️ Please enter both a YouTube URL and a query before submitting.")

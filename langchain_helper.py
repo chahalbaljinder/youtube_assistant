@@ -1,9 +1,9 @@
 from langchain_community.document_loaders import YoutubeLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.llms.base import LLM
 import google.generativeai as genai
@@ -65,27 +65,53 @@ def create_db_from_youtube_video_url(video_url: str) -> FAISS:
     Fetches transcript from YouTube, processes it, and creates a FAISS vector store.
     """
     try:
-        loader = YoutubeLoader.from_youtube_url(video_url)
+        # Validate YouTube URL
+        if not video_url or not ("youtube.com" in video_url or "youtu.be" in video_url):
+            raise ValueError("❌ Invalid YouTube URL. Please provide a valid YouTube video URL.")
+        
+        # Load YouTube transcript
+        loader = YoutubeLoader.from_youtube_url(
+            video_url,
+            add_video_info=True,
+            language=["en", "en-US"],
+            translation="en"
+        )
         transcript = loader.load()
 
         if not transcript:
-            raise ValueError("⚠️ No transcript found for this video. Please try another one.")
+            raise ValueError("⚠️ No transcript found for this video. Please try another video or ensure the video has captions/subtitles available.")
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        # Check if transcript content is valid
+        if not transcript[0].page_content.strip():
+            raise ValueError("⚠️ The transcript appears to be empty. Please try another video.")
+
+        # Split transcript into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=100,
+            length_function=len,
+            separators=["\n\n", "\n", " ", ""]
+        )
         docs = text_splitter.split_documents(transcript)
 
         if not docs:
             raise ValueError("⚠️ Failed to split transcript into valid documents.")
 
-        # Ensure embeddings are generated before FAISS indexing
-        if embeddings and docs:
-            db = FAISS.from_documents(docs, embeddings)
-            return db
-        else:
-            raise ValueError("⚠️ Failed to generate embeddings.")
+        # Create FAISS vector store
+        db = FAISS.from_documents(docs, embeddings)
+        return db
     
     except Exception as e:
-        raise RuntimeError(f"🚨 Error while creating FAISS index: {str(e)}")
+        error_msg = str(e)
+        if "no element found" in error_msg:
+            raise RuntimeError("🚨 Error: Could not load video transcript. This may happen if:\n"
+                             "• The video is private or restricted\n"
+                             "• The video doesn't have captions/subtitles\n"
+                             "• The YouTube URL is invalid\n"
+                             "• The video is age-restricted\n"
+                             "Please try another video with available captions.")
+        else:
+            raise RuntimeError(f"🚨 Error while creating FAISS index: {error_msg}")
 
 def get_response_from_query(db, query, k=4):
     """
